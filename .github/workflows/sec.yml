@@ -16,17 +16,19 @@ jobs:
       - name: Show FULL repo tree
         run: |
           echo "=== FULL WORKSPACE TREE ==="
-          ls -R .
+          ls -R /home/runner/work/sec-form4-scraper/
 
       - name: Find all main.py files
         run: |
-          echo "Searching for main.py..."
-          find . -type f -name "main.py" -print
+          echo "=== SEARCHING FOR main.py ==="
+          find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" -print
 
       - name: Print main.py for debugging
         run: |
+          FILE=$(find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" | head -1)
+          echo "Found file at: $FILE"
           echo "===== PRINTING main.py ====="
-          cat main.py || echo "main.py not found"
+          cat "$FILE"
           echo "===== END FILE ====="
 
       - name: Set up Python
@@ -41,4 +43,7 @@ jobs:
         env:
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: python main.py
+        run: |
+          FILE=$(find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" | head -1)
+          echo "Running: $FILE"
+          python "$FILE"
