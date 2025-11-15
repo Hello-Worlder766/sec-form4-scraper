@@ -1,74 +1,35 @@
-def fetch_recent_form4s_json():
-    """
-    Pulls ALL Form 4 filings from the past 14 days using SEC's master
-    filings index (submissions feed). This does not rely on the broken
-    "latest filings" endpoint.
-    """
+import os
+import json
+import requests
 
-    print(">>> Fetching master index for all companies (14 days)…")
+print(">>> main.py is running!")
+print(">>> Current path:", os.path.abspath(__file__))
 
-    base = "https://data.sec.gov/submissions/"
+# --- Test #1: Verify secrets are readable ---
+try:
+    key = os.environ["GOOGLE_SHEETS_KEY"]
+    print(">>> GOOGLE_SHEETS_KEY length:", len(key))
+except Exception as e:
+    print("!!! ERROR: GOOGLE_SHEETS_KEY not found:", e)
 
-    # Master CIK list endpoint (documented)
-    CIK_LIST_URL = "https://www.sec.gov/files/company_tickers.json"
+try:
+    sid = os.environ["SHEET_ID"]
+    print(">>> SHEET_ID loaded:", sid)
+except Exception as e:
+    print("!!! ERROR: SHEET_ID not found:", e)
 
-    try:
-        company_data = requests.get(CIK_LIST_URL, headers=HEADERS).json()
-    except Exception as e:
-        print("Error downloading CIK list:", e)
-        return []
+# --- Test #2: Make a simple ping to Google ---
+try:
+    resp = requests.get("https://www.google.com", timeout=5)
+    print(">>> Google ping status:", resp.status_code)
+except Exception as e:
+    print("!!! ERROR pinging Google:", e)
 
-    urls = []
-    count = 0
+# --- Test #3: Ping SEC---
+try:
+    resp2 = requests.get("https://www.sec.gov", headers={"User-Agent": "insidesignal-test"}, timeout=5)
+    print(">>> SEC ping status:", resp2.status_code)
+except Exception as e:
+    print("!!! ERROR pinging SEC:", e)
 
-    # Go through every company in the SEC database
-    for entry in company_data.values():
-        cik = str(entry["cik_str"]).zfill(10)
-
-        filings_url = f"{base}CIK{cik}.json"
-
-        try:
-            data = requests.get(filings_url, headers=HEADERS).json()
-        except:
-            continue
-
-        if "filings" not in data or "recent" not in data["filings"]:
-            continue
-
-        recent = data["filings"]["recent"]
-
-        forms = recent.get("form", [])
-        accession = recent.get("accessionNumber", [])
-        report_dates = recent.get("filingDate", [])
-
-        # Loop through all recent filings for this company
-        for f, acc, date in zip(forms, accession, report_dates):
-
-            # Only Form 4s
-            if f != "4":
-                continue
-
-            # Filter filings to last 14 days
-            try:
-                dt = datetime.strptime(date, "%Y-%m-%d")
-                if (datetime.now() - dt).days > 14:
-                    continue
-            except:
-                continue
-
-            acc_clean = acc.replace("-", "")
-
-            xml_url = (
-                f"https://www.sec.gov/Archives/edgar/data/"
-                f"{int(cik)}/{acc_clean}/xslF345X03/doc.xml"
-            )
-
-            urls.append(xml_url)
-            count += 1
-
-        # Limit (optional) to speed up testing
-        if count > 300:
-            break
-
-    print(">>> Found Form 4 XML URLs (14 days):", len(urls))
-    return urls
+print(">>> TEST COMPLETE <<<")
