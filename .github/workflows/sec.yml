@@ -8,38 +8,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
 
-    - name: Checkout repo (no nesting!)
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-        clean: true
-        path: .
+      - name: Show FULL repo tree
+        run: |
+          echo "=== FULL WORKSPACE TREE ==="
+          ls -R .
 
-    - name: SHOW WORKSPACE TREE (CRITICAL)
-      run: |
-        echo "=== WORKSPACE ROOT ==="
-        pwd
-        echo "=== DIRECTORY TREE ==="
-        ls -R .
+      - name: Find all main.py files
+        run: |
+          echo "Searching for main.py..."
+          find . -type f -name "main.py" -print
 
-    - name: SEARCH FOR ALL main.py FILES (CRITICAL)
-      run: |
-        echo "=== Searching for ALL main.py files ==="
-        find . -name "main.py" -print
+      - name: Print main.py for debugging
+        run: |
+          echo "===== PRINTING main.py ====="
+          cat main.py || echo "main.py not found"
+          echo "===== END FILE ====="
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-    - name: Install dependencies
-      run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-    - name: RUN THE REAL main.py (force root)
-      run: |
-        echo ">>> RUNNING ROOT main.py"
-        python ./main.py
-      env:
-        GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
-        SHEET_ID: ${{ secrets.SHEET_ID }}
+      - name: Run scraper
+        env:
+          GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python main.py
