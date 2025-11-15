@@ -1,88 +1,63 @@
 import requests
-import xml.etree.ElementTree as ET
 import gspread
 import json
 import os
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
-print(">>> Running main.py from:", os.path.abspath(__file__))
+print(">>> Running main.py:", os.path.abspath(__file__))
 
 # Load Google credentials
 google_creds = json.loads(os.environ["GOOGLE_SHEETS_KEY"])
 
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
+scope = ["https://spreadsheets.google.com/feeds",
+         "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
 client = gspread.authorize(creds)
 
 sheet_id = os.environ["SHEET_ID"]
 sheet = client.open_by_key(sheet_id).worksheet("Trades")
 
-# --- REAL SEC Atom feed ---
-ATOM_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&owner=only&output=atom"
+# 🔥 REAL WORKING JSON FEED
+SEC_JSON_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&owner=only&output=json"
 
 
-def fetch_form4_urls():
+def fetch_form4_json():
     headers = {"User-Agent": "insidesignal/1.0"}
-    xml_text = requests.get(ATOM_URL, headers=headers).text
-
-    print("Fetched SEC Atom feed length:", len(xml_text))
+    r = requests.get(SEC_JSON_URL, headers=headers)
+    print("Fetched SEC JSON length:", len(r.text))
 
     try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        print("XML Parse Error:", e)
+        data = r.json()
+    except:
+        print("SEC JSON parse error")
         return []
 
-    # Atom feed structure: <entry><id>...Accession...CIK...</id></entry>
-    entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    items = data.get("filings", {}).get("recent", {})
+    print("Items present:", len(items.get("accessionNumber", [])))
 
-    print("Atom entries found:", len(entries))
+    results = []
+    for i in range(len(items["accessionNumber"])):
+        accession = items["accessionNumber"][i].replace("-", "")
+        cik = items["cik"][i]
 
-    urls = []
-    for entry in entries:
-        # Filing detail page
-        link = entry.find("{http://www.w3.org/2005/Atom}link")
-        if link is None:
-            continue
+        xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/xslF345X03/doc.xml"
+        results.append(xml_url)
 
-        href = link.get("href")
-        if not href:
-            continue
-
-        # Convert filing detail URL → XML doc URL
-        # Example detail URL:
-        #   https://www.sec.gov/Archives/edgar/data/1234/0001234-25-00001-index.html
-        #
-        # Convert to:
-        #   https://www.sec.gov/Archives/edgar/data/1234/00012342500001/xslF345X03/doc.xml
-
-        try:
-            parts = href.replace("-index.html", "").split("/")
-            cik = parts[-2]
-            acc_no = parts[-1].replace("-", "")
-            xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/xslF345X03/doc.xml"
-            urls.append(xml_url)
-        except Exception:
-            continue
-
-    print("Final XML URLs extracted:", len(urls))
-    return urls
+    print("Final XML URLs:", len(results))
+    return results
 
 
 def parse_form4(xml_url):
     headers = {"User-Agent": "insidesignal/1.0"}
     resp = requests.get(xml_url, headers=headers)
-
     if resp.status_code != 200:
         return None
 
+    import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(resp.text)
-    except ET.ParseError:
+    except:
         return None
 
     issuer = root.find(".//issuer/issuerName")
@@ -111,8 +86,7 @@ def parse_form4(xml_url):
         except:
             continue
 
-        amount = shares * price
-        total_amount += amount
+        total_amount += shares * price
         shares_out = shares
         price_out = price
 
@@ -148,15 +122,16 @@ def write_to_sheet(rows):
 
 
 def main():
-    urls = fetch_form4_urls()
-    results = []
+    urls = fetch_form4_json()
+    print(">>> URLS FOUND:", len(urls))
 
+    results = []
     for url in urls:
         parsed = parse_form4(url)
         if parsed:
             results.append(parsed)
 
-    print("Trades >= $5M found:", len(results))
+    print(">>> TRADES >= $5M:", len(results))
     write_to_sheet(results)
     print("Done.")
 
