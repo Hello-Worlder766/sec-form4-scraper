@@ -1,4 +1,4 @@
-name: Fetch Form4 Data
+name: Fetch Insider Trades
 
 on:
   workflow_dispatch:
@@ -8,19 +8,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+    - name: Install dependencies
+      run: pip install -r requirements.txt
 
-      - name: Run scraper
-        env:
-          GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: python main.py
+    # 🔥 ADD THIS STEP RIGHT HERE
+    - name: Find all main.py files in the repo
+      run: |
+        echo "Searching for ALL main.py files..."
+        find . -name "main.py" -print
+        echo "---"
+        echo "Full TREE:"
+        ls -R .
+
+    - name: Run script
+      env:
+        GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
+        SHEET_ID: ${{ secrets.SHEET_ID }}
+      run: python main.py
