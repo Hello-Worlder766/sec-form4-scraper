@@ -8,37 +8,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo (force fresh)
+      - name: Checkout repo
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          clean: true
-
-      - name: Locate project directory
-        id: repo-dir
-        run: |
-          python - <<'PY'
-import os
-
-matches = []
-for root, dirs, files in os.walk('.'):
-    if '.git' in dirs:
-        dirs.remove('.git')
-
-    if 'main.py' in files and 'requirements.txt' in files:
-        matches.append(os.path.relpath(root, '.'))
-
-if not matches:
-    raise SystemExit('❌ ERROR: No folder found containing BOTH main.py and requirements.txt')
-
-matches.sort(key=lambda p: (p.count(os.sep), p))
-target = matches[-1]
-
-print(f"👉 Using project directory: {target}")
-
-with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
-    fh.write(f"dir={target}\n")
-PY
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -46,18 +17,9 @@ PY
           python-version: "3.11"
 
       - name: Install dependencies
-        working-directory: ${{ steps.repo-dir.outputs.dir }}
         run: pip install -r requirements.txt
 
-      - name: Debug directory structure
-        run: |
-          echo "=== FULL WORKSPACE TREE ==="
-          ls -R .
-          echo "=== PROJECT DIRECTORY TREE (${{ steps.repo-dir.outputs.dir }}) ==="
-          ls -R "${{ steps.repo-dir.outputs.dir }}"
-
-      - name: Run scraper
-        working-directory: ${{ steps.repo-dir.outputs.dir }}
+      - name: Run script
         env:
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
