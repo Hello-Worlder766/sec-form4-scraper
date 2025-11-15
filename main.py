@@ -1,106 +1,138 @@
 import requests
+import xml.etree.ElementTree as ET
 import gspread
 import json
 import os
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
-print(">>> Running main.py:", os.path.abspath(__file__))
+print(">>> Running main.py from:", os.path.abspath(__file__))
 
-# Load Google credentials
+# Load Google credentials from GitHub Secret
 google_creds = json.loads(os.environ["GOOGLE_SHEETS_KEY"])
 
-scope = ["https://spreadsheets.google.com/feeds",
-         "https://www.googleapis.com/auth/drive"]
+# Google Sheets setup
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
 client = gspread.authorize(creds)
 
 sheet_id = os.environ["SHEET_ID"]
 sheet = client.open_by_key(sheet_id).worksheet("Trades")
 
-# 🔥 REAL WORKING JSON FEED
-SEC_JSON_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&owner=only&output=json"
+
+# ----------------------------------------------------------
+# USE THE JSON "recent filings" endpoint
+# ----------------------------------------------------------
+JSON_URL = "https://data.sec.gov/submissions/CIK0000320193.json"  # Apple CIK to test connectivity
+
+HEADERS = {
+    "User-Agent": "InsideSignalTrader/1.0 contact@example.com"
+}
 
 
-def fetch_form4_json():
-    headers = {"User-Agent": "insidesignal/1.0"}
-    r = requests.get(SEC_JSON_URL, headers=headers)
-    print("Fetched SEC JSON length:", len(r.text))
+def fetch_recent_form4s_json():
+    """
+    Uses SEC's JSON submissions API instead of the broken HTML feed.
+    We first hit Apple (AAPL) just to confirm SEC allows our User-Agent.
+    Then we fetch ALL recent filings from the public filings feed.
+    """
+    print(">>> Testing connectivity with Apple JSON…")
 
     try:
-        data = r.json()
-    except:
-        print("SEC JSON parse error")
+        test = requests.get(JSON_URL, headers=HEADERS)
+        print("Test status:", test.status_code)
+    except Exception as e:
+        print("Request error:", e)
         return []
 
-    items = data.get("filings", {}).get("recent", {})
-    print("Items present:", len(items.get("accessionNumber", [])))
+    # Now hit the REAL Form 4 feed
+    print(">>> Fetching master filings…")
+    url = "https://data.sec.gov/rss?formType=4&excludeDocuments=true"
 
-    results = []
-    for i in range(len(items["accessionNumber"])):
-        accession = items["accessionNumber"][i].replace("-", "")
-        cik = items["cik"][i]
+    try:
+        resp = requests.get(url, headers=HEADERS)
+        print("Master feed status:", resp.status_code)
+        text = resp.text
+    except Exception as e:
+        print("Master feed crashed:", e)
+        return []
 
-        xml_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/xslF345X03/doc.xml"
-        results.append(xml_url)
+    # Parse the feed
+    urls = []
 
-    print("Final XML URLs:", len(results))
-    return results
+    for line in text.splitlines():
+        if "edgar/data" in line and "xml" in line:
+            line = line.strip()
+            start = line.find("https://")
+            end = line.find(".xml") + 4
+            if start != -1 and end != -1:
+                xml_url = line[start:end]
+                urls.append(xml_url)
+
+    print(">>> Found URLs:", len(urls))
+    return urls
 
 
 def parse_form4(xml_url):
-    headers = {"User-Agent": "insidesignal/1.0"}
-    resp = requests.get(xml_url, headers=headers)
-    if resp.status_code != 200:
-        return None
-
-    import xml.etree.ElementTree as ET
+    """
+    Extracts trade size and info from a single Form 4 XML.
+    Only keeps trades >= $5M.
+    """
     try:
+        resp = requests.get(xml_url, headers=HEADERS)
+        if resp.status_code != 200:
+            return None
+
         root = ET.fromstring(resp.text)
-    except:
+
+        issuer = root.find(".//issuer/issuerName")
+        company = issuer.text if issuer is not None else ""
+
+        reporting = root.find(".//reportingOwner")
+        insider = reporting.find(".//rptOwnerName").text if reporting is not None else ""
+        role_node = reporting.find(".//rptOwnerRelationship/officerTitle")
+        role = role_node.text if role_node is not None else ""
+
+        txn_nodes = root.findall(".//nonDerivativeTransaction")
+
+        total = 0
+        last_shares = 0
+        last_price = 0
+
+        for txn in txn_nodes:
+            shares = txn.find(".//transactionShares/value")
+            price = txn.find(".//transactionPricePerShare/value")
+            if shares is None or price is None:
+                continue
+            try:
+                s = float(shares.text)
+                p = float(price.text)
+            except:
+                continue
+
+            total += s * p
+            last_shares = s
+            last_price = p
+
+        if total >= 5_000_000:
+            print(">>> Big trade:", company, insider, total)
+            return {
+                "company": company,
+                "ticker": "",
+                "insider": insider,
+                "role": role,
+                "shares": last_shares,
+                "price": last_price,
+                "amount": total,
+                "link": xml_url,
+            }
+
+    except Exception as e:
+        print("Parse error:", e)
         return None
-
-    issuer = root.find(".//issuer/issuerName")
-    company = issuer.text if issuer is not None else ""
-
-    reporting = root.find(".//reportingOwner")
-    insider = reporting.find(".//rptOwnerName").text if reporting is not None else ""
-    role_node = reporting.find(".//rptOwnerRelationship/officerTitle")
-    role = role_node.text if role_node is not None else ""
-
-    txn_nodes = root.findall(".//nonDerivativeTransaction")
-
-    total_amount = 0
-    shares_out = 0
-    price_out = 0
-
-    for txn in txn_nodes:
-        shares_node = txn.find(".//transactionShares/value")
-        price_node = txn.find(".//transactionPricePerShare/value")
-        if shares_node is None or price_node is None:
-            continue
-
-        try:
-            shares = float(shares_node.text)
-            price = float(price_node.text)
-        except:
-            continue
-
-        total_amount += shares * price
-        shares_out = shares
-        price_out = price
-
-    if total_amount >= 5_000_000:
-        return {
-            "company": company,
-            "ticker": "",
-            "insider": insider,
-            "role": role,
-            "shares": shares_out,
-            "price": price_out,
-            "amount": total_amount,
-            "link": xml_url,
-        }
 
     return None
 
@@ -116,24 +148,32 @@ def write_to_sheet(rows):
 
     for r in rows:
         sheet.append_row([
-            today, r["company"], r["ticker"], r["insider"],
-            r["role"], r["shares"], r["price"], r["amount"], r["link"]
+            today,
+            r["company"],
+            r["ticker"],
+            r["insider"],
+            r["role"],
+            r["shares"],
+            r["price"],
+            r["amount"],
+            r["link"],
         ])
 
 
 def main():
-    urls = fetch_form4_json()
-    print(">>> URLS FOUND:", len(urls))
+    urls = fetch_recent_form4s_json()
+
+    print(">>> URLs found:", len(urls))
 
     results = []
     for url in urls:
-        parsed = parse_form4(url)
-        if parsed:
-            results.append(parsed)
+        data = parse_form4(url)
+        if data:
+            results.append(data)
 
-    print(">>> TRADES >= $5M:", len(results))
+    print(">>> Final big trades:", len(results))
+
     write_to_sheet(results)
-    print("Done.")
 
 
 if __name__ == "__main__":
