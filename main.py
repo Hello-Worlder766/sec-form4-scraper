@@ -1,104 +1,64 @@
 import requests
-import gspread
-import json
-import os
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+import re
+import time
+from datetime import datetime, timedelta
 
-print(">>> Running main.py from:", os.path.abspath(__file__))
+RSS_URL = "https://www.sec.gov/cgi-bin/current?q1=4&q2=0"
 
-# -----------------------------------------
-# GOOGLE SHEETS AUTH
-# -----------------------------------------
-google_creds = json.loads(os.environ["GOOGLE_SHEETS_KEY"])
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; InsideSignalTrader; "
+        "+https://github.com/Hello-Worlder766/sec-form4-scraper; "
+        "email=nathanrcook766@gmail.com)"
+    )
+}
 
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
-]
+def fetch_sec_page():
+    """Fetch SEC page with retries if blocked by 'undeclared automated tool'."""
+    for attempt in range(5):
+        resp = requests.get(RSS_URL, headers=HEADERS)
+        text = resp.text
 
-creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
-client = gspread.authorize(creds)
+        # If SEC blocks us, the HTML contains the exact line you saw
+        if "Your Request Originates from an Undeclared Automated Tool" in text:
+            print(f"⚠ SEC blocked us (attempt {attempt+1}/5). Waiting 10 seconds and retrying...")
+            time.sleep(10)
+            continue
 
-sheet_id = os.environ["SHEET_ID"]
-sheet = client.open_by_key(sheet_id).worksheet("Trades")
+        return text
 
-# SEC latest forms page
-RSS_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4"
+    raise RuntimeError("SEC blocked all attempts — update User-Agent or slow schedule")
 
 
-# -----------------------------------------
-# FETCH FORM 4 PAGE (DEBUG MODE)
-# -----------------------------------------
 def fetch_form4_urls():
-    headers = {"User-Agent": "insidesignal/1.0"}
+    html = fetch_sec_page()
 
-    try:
-        html = requests.get(RSS_URL, headers=headers).text
-    except Exception as e:
-        print(">>> ERROR FETCHING SEC PAGE:", e)
-        return []
-
-    print("\n=== SEC PAGE DEBUG ===")
     print("Fetched SEC page length:", len(html))
-    print("\n--- BEGIN RAW HTML (first 5000 chars) ---\n")
-    print(html[:5000])
-    print("\n--- END RAW HTML ---\n")
-    print("=====================================================\n")
 
-    # TEMPORARILY return no URLs until we analyze the raw HTML
-    return []
+    # Real Form 4 pattern on the human-readable feed
+    pattern = re.compile(
+        r"Accession Number:\s+([0-9\-]+)",
+        re.MULTILINE
+    )
 
+    matches = pattern.findall(html)
+    print("Matches found:", len(matches))
 
-# -----------------------------------------
-# PARSE FORM 4 XML (will be used after debugging)
-# -----------------------------------------
-def parse_form4(xml_url):
-    return None  # Temporarily disabled until we finish HTML parsing
+    # Build URLs
+    urls = [
+        f"https://www.sec.gov/Archives/edgar/data/{acc.replace('-', '')}/{acc}/xslF345X04/doc.xml"
+        for acc in matches
+    ]
 
-
-# -----------------------------------------
-# WRITE RESULTS TO GOOGLE SHEETS
-# -----------------------------------------
-def write_to_sheet(rows):
-    sheet.clear()
-    sheet.append_row([
-        "Date", "Company", "Ticker", "Insider", "Role",
-        "Shares", "Price", "Amount", "Link"
-    ])
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    for r in rows:
-        sheet.append_row([
-            today,
-            r.get("company", ""),
-            r.get("ticker", ""),
-            r.get("insider", ""),
-            r.get("role", ""),
-            r.get("shares", ""),
-            r.get("price", ""),
-            r.get("amount", ""),
-            r.get("link", ""),
-        ])
+    return urls
 
 
-# -----------------------------------------
-# MAIN EXECUTION
-# -----------------------------------------
 def main():
+    print("=== Fetching URLs ===")
     urls = fetch_form4_urls()
-
     print("Found URLs:", len(urls))
 
-    results = []
-    for url in urls:
-        parsed = parse_form4(url)
-        if parsed:
-            results.append(parsed)
-
-    print("Final big trades:", len(results))
-    write_to_sheet(results)
+    print("Done.")
 
 
 if __name__ == "__main__":
