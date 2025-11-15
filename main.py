@@ -1,180 +1,74 @@
-import requests
-import xml.etree.ElementTree as ET
-import gspread
-import json
-import os
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-
-print(">>> Running main.py from:", os.path.abspath(__file__))
-
-# Load Google credentials from GitHub Secret
-google_creds = json.loads(os.environ["GOOGLE_SHEETS_KEY"])
-
-# Google Sheets setup
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
-]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(google_creds, scope)
-client = gspread.authorize(creds)
-
-sheet_id = os.environ["SHEET_ID"]
-sheet = client.open_by_key(sheet_id).worksheet("Trades")
-
-
-# ----------------------------------------------------------
-# USE THE JSON "recent filings" endpoint
-# ----------------------------------------------------------
-JSON_URL = "https://data.sec.gov/submissions/CIK0000320193.json"  # Apple CIK to test connectivity
-
-HEADERS = {
-    "User-Agent": "InsideSignalTrader/1.0 contact@example.com"
-}
-
-
 def fetch_recent_form4s_json():
     """
-    Uses SEC's JSON submissions API instead of the broken HTML feed.
-    We first hit Apple (AAPL) just to confirm SEC allows our User-Agent.
-    Then we fetch ALL recent filings from the public filings feed.
+    Pulls ALL Form 4 filings from the past 14 days using SEC's master
+    filings index (submissions feed). This does not rely on the broken
+    "latest filings" endpoint.
     """
-    print(">>> Testing connectivity with Apple JSON…")
+
+    print(">>> Fetching master index for all companies (14 days)…")
+
+    base = "https://data.sec.gov/submissions/"
+
+    # Master CIK list endpoint (documented)
+    CIK_LIST_URL = "https://www.sec.gov/files/company_tickers.json"
 
     try:
-        test = requests.get(JSON_URL, headers=HEADERS)
-        print("Test status:", test.status_code)
+        company_data = requests.get(CIK_LIST_URL, headers=HEADERS).json()
     except Exception as e:
-        print("Request error:", e)
+        print("Error downloading CIK list:", e)
         return []
 
-    # Now hit the REAL Form 4 feed
-    print(">>> Fetching master filings…")
-    url = "https://data.sec.gov/rss?formType=4&excludeDocuments=true"
-
-    try:
-        resp = requests.get(url, headers=HEADERS)
-        print("Master feed status:", resp.status_code)
-        text = resp.text
-    except Exception as e:
-        print("Master feed crashed:", e)
-        return []
-
-    # Parse the feed
     urls = []
+    count = 0
 
-    for line in text.splitlines():
-        if "edgar/data" in line and "xml" in line:
-            line = line.strip()
-            start = line.find("https://")
-            end = line.find(".xml") + 4
-            if start != -1 and end != -1:
-                xml_url = line[start:end]
-                urls.append(xml_url)
+    # Go through every company in the SEC database
+    for entry in company_data.values():
+        cik = str(entry["cik_str"]).zfill(10)
 
-    print(">>> Found URLs:", len(urls))
-    return urls
+        filings_url = f"{base}CIK{cik}.json"
 
+        try:
+            data = requests.get(filings_url, headers=HEADERS).json()
+        except:
+            continue
 
-def parse_form4(xml_url):
-    """
-    Extracts trade size and info from a single Form 4 XML.
-    Only keeps trades >= $5M.
-    """
-    try:
-        resp = requests.get(xml_url, headers=HEADERS)
-        if resp.status_code != 200:
-            return None
+        if "filings" not in data or "recent" not in data["filings"]:
+            continue
 
-        root = ET.fromstring(resp.text)
+        recent = data["filings"]["recent"]
 
-        issuer = root.find(".//issuer/issuerName")
-        company = issuer.text if issuer is not None else ""
+        forms = recent.get("form", [])
+        accession = recent.get("accessionNumber", [])
+        report_dates = recent.get("filingDate", [])
 
-        reporting = root.find(".//reportingOwner")
-        insider = reporting.find(".//rptOwnerName").text if reporting is not None else ""
-        role_node = reporting.find(".//rptOwnerRelationship/officerTitle")
-        role = role_node.text if role_node is not None else ""
+        # Loop through all recent filings for this company
+        for f, acc, date in zip(forms, accession, report_dates):
 
-        txn_nodes = root.findall(".//nonDerivativeTransaction")
-
-        total = 0
-        last_shares = 0
-        last_price = 0
-
-        for txn in txn_nodes:
-            shares = txn.find(".//transactionShares/value")
-            price = txn.find(".//transactionPricePerShare/value")
-            if shares is None or price is None:
+            # Only Form 4s
+            if f != "4":
                 continue
+
+            # Filter filings to last 14 days
             try:
-                s = float(shares.text)
-                p = float(price.text)
+                dt = datetime.strptime(date, "%Y-%m-%d")
+                if (datetime.now() - dt).days > 14:
+                    continue
             except:
                 continue
 
-            total += s * p
-            last_shares = s
-            last_price = p
+            acc_clean = acc.replace("-", "")
 
-        if total >= 5_000_000:
-            print(">>> Big trade:", company, insider, total)
-            return {
-                "company": company,
-                "ticker": "",
-                "insider": insider,
-                "role": role,
-                "shares": last_shares,
-                "price": last_price,
-                "amount": total,
-                "link": xml_url,
-            }
+            xml_url = (
+                f"https://www.sec.gov/Archives/edgar/data/"
+                f"{int(cik)}/{acc_clean}/xslF345X03/doc.xml"
+            )
 
-    except Exception as e:
-        print("Parse error:", e)
-        return None
+            urls.append(xml_url)
+            count += 1
 
-    return None
+        # Limit (optional) to speed up testing
+        if count > 300:
+            break
 
-
-def write_to_sheet(rows):
-    sheet.clear()
-    sheet.append_row([
-        "Date", "Company", "Ticker", "Insider", "Role",
-        "Shares", "Price", "Amount", "Link"
-    ])
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    for r in rows:
-        sheet.append_row([
-            today,
-            r["company"],
-            r["ticker"],
-            r["insider"],
-            r["role"],
-            r["shares"],
-            r["price"],
-            r["amount"],
-            r["link"],
-        ])
-
-
-def main():
-    urls = fetch_recent_form4s_json()
-
-    print(">>> URLs found:", len(urls))
-
-    results = []
-    for url in urls:
-        data = parse_form4(url)
-        if data:
-            results.append(data)
-
-    print(">>> Final big trades:", len(results))
-
-    write_to_sheet(results)
-
-
-if __name__ == "__main__":
-    main()
+    print(">>> Found Form 4 XML URLs (14 days):", len(urls))
+    return urls
