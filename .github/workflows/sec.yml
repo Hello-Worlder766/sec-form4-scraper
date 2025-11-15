@@ -38,5 +38,7 @@ jobs:
         env:
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-        working-directory: ${{ steps.find-dir.outputs.dir }}
-        run: python main.py
+        run: |
+          echo ">>> Running main.py from: $(pwd)/main.py"
+          python main.py
+
