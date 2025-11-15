@@ -1,4 +1,5 @@
 name: Fetch Insider Trades
+
 on:
   workflow_dispatch:
 
@@ -7,38 +8,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo cleanly
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 1
 
-      - name: Locate project directory
-        id: find-dir
-        run: |
-          echo "Searching for main.py..."
-          DIR=$(find . -maxdepth 3 -type f -name "main.py" -printf '%h\n' | head -n 1)
-          echo "Found directory: $DIR"
-          echo "dir=$DIR" >> $GITHUB_OUTPUT
+    - name: Checkout repo (no nesting!)
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        clean: true
+        path: .
 
-      - name: Show project tree
-        run: |
-          echo "=== TREE ==="
-          ls -R .
+    - name: SHOW WORKSPACE TREE (CRITICAL)
+      run: |
+        echo "=== WORKSPACE ROOT ==="
+        pwd
+        echo "=== DIRECTORY TREE ==="
+        ls -R .
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+    - name: SEARCH FOR ALL main.py FILES (CRITICAL)
+      run: |
+        echo "=== Searching for ALL main.py files ==="
+        find . -name "main.py" -print
 
-      - name: Install dependencies
-        working-directory: ${{ steps.find-dir.outputs.dir }}
-        run: pip install -r requirements.txt
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
 
-      - name: Run script
-        env:
-          GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: |
-          echo ">>> Running main.py from: $(pwd)/main.py"
-          python main.py
+    - name: Install dependencies
+      run: pip install -r requirements.txt
 
+    - name: RUN THE REAL main.py (force root)
+      run: |
+        echo ">>> RUNNING ROOT main.py"
+        python ./main.py
+      env:
+        GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
+        SHEET_ID: ${{ secrets.SHEET_ID }}
