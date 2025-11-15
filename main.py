@@ -36,18 +36,13 @@ def fetch_form4_urls():
     headers = {"User-Agent": "insidesignal/1.0"}
     html = requests.get(RSS_URL, headers=headers).text
 
-    print("Fetched SEC page length:", len(html))
+    print("\n===== DEBUG HTML FIRST 500 CHARS =====")
+    print(html[:500])
+    print("\n===== DEBUG HTML DONE =====\n")
 
-    # THIS REGEX MATCHES YOUR REAL HTML EXACTLY
-    pattern = re.compile(
-        r"Accession Number:\s+([0-9\-]+)[\s\S]+?\((\d{7,})\)",
-        re.MULTILINE,
-    )
+    # TEMP: we stop here so the rest of the scraper doesn't run
+    return []
 
-    matches = pattern.findall(html)
-    print("Matches found:", len(matches))
-
-    urls = []
     for accession, cik in matches:
         acc_clean = accession.replace("-", "")
         cik_clean = cik.lstrip("0")  # SEC folder removes leading zeros
