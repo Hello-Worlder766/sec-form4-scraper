@@ -16,16 +16,16 @@ jobs:
       - name: Show FULL repo tree
         run: |
           echo "=== FULL WORKSPACE TREE ==="
-          ls -R /home/runner/work/sec-form4-scraper/
+          ls -R "${{ github.workspace }}"
 
       - name: Find all main.py files
         run: |
           echo "=== SEARCHING FOR main.py ==="
-          find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" -print
+          find "${{ github.workspace }}" -type f -name "main.py" -print
 
       - name: Print main.py for debugging
         run: |
-          FILE=$(find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" | head -1)
+          FILE=$(find "${{ github.workspace }}" -type f -name "main.py" | head -1)
           echo "Found file at: $FILE"
           echo "===== PRINTING main.py ====="
           cat "$FILE"
@@ -44,6 +44,6 @@ jobs:
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
         run: |
-          FILE=$(find /home/runner/work/sec-form4-scraper/ -type f -name "main.py" | head -1)
+          FILE=$(find "${{ github.workspace }}" -type f -name "main.py" | head -1)
           echo "Running: $FILE"
           python "$FILE"
