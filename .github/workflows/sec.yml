@@ -1,74 +1,64 @@
-diff --git a/.github/workflows/sec.yml b/.github/workflows/sec.yml
-index 54c749cfd0e9ba7ad7e480849ab9779f3a8cc569..91b93c8c3e92bef284933c3fbf98c4f1757b9b45 100644
---- a/.github/workflows/sec.yml
-+++ b/.github/workflows/sec.yml
-@@ -1,35 +1,69 @@
- name: Fetch Insider Trades
- 
- on:
-   workflow_dispatch:
- 
- jobs:
-   run:
-     runs-on: ubuntu-latest
- 
-     steps:
- 
-       - name: Checkout repo (force fresh)
-         uses: actions/checkout@v3
-         with:
-           fetch-depth: 0
-           clean: true
- 
-+      - name: Locate project directory
-+        id: repo-dir
-+        run: |
-+          set -euo pipefail
-+          python - <<'PY'
-+import os
-+
-+matches = []
-+for root, dirs, files in os.walk('.'):
-+    # Ignore .git directories entirely
-+    if '.git' in dirs:
-+        dirs.remove('.git')
-+
-+    if 'main.py' in files and 'requirements.txt' in files:
-+        matches.append(os.path.relpath(root, '.'))
-+
-+if not matches:
-+    raise SystemExit('Unable to find a directory that contains both main.py and requirements.txt')
-+
-+# Prioritise the deepest directory (handles accidental nesting) and, as a tiebreaker,
-+# pick the lexicographically-last match so results are deterministic.
-+matches.sort(key=lambda p: (p.count(os.sep), p))
-+target = matches[-1]
-+print(f"Using directory: {target}")
-+
-+# Write to $GITHUB_OUTPUT via the conventional env var exposed by GitHub
-+with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-+    fh.write(f"dir={target}\n")
-+PY
-+
-       - name: Set up Python
-         uses: actions/setup-python@v4
-         with:
-           python-version: "3.11"
- 
-       - name: Install dependencies
-+        working-directory: ${{ steps.repo-dir.outputs.dir }}
-         run: pip install -r requirements.txt
- 
-       - name: Debug directory structure
-         run: |
-           echo "=== FULL WORKSPACE TREE ==="
-           ls -R .
-+          echo "=== PROJECT DIRECTORY TREE (${{ steps.repo-dir.outputs.dir }}) ==="
-+          ls -R "${{ steps.repo-dir.outputs.dir }}"
- 
-       - name: Run scraper
-         env:
-           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
-           SHEET_ID: ${{ secrets.SHEET_ID }}
-+        working-directory: ${{ steps.repo-dir.outputs.dir }}
-         run: python main.py
+name: Fetch Insider Trades
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo (force fresh)
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - name: Locate project directory
+        id: repo-dir
+        run: |
+          python - <<'PY'
+import os
+
+matches = []
+for root, dirs, files in os.walk('.'):
+    if '.git' in dirs:
+        dirs.remove('.git')
+
+    if 'main.py' in files and 'requirements.txt' in files:
+        matches.append(os.path.relpath(root, '.'))
+
+if not matches:
+    raise SystemExit('❌ ERROR: No folder found containing BOTH main.py and requirements.txt')
+
+matches.sort(key=lambda p: (p.count(os.sep), p))
+target = matches[-1]
+
+print(f"👉 Using project directory: {target}")
+
+with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+    fh.write(f"dir={target}\n")
+PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: ${{ steps.repo-dir.outputs.dir }}
+        run: pip install -r requirements.txt
+
+      - name: Debug directory structure
+        run: |
+          echo "=== FULL WORKSPACE TREE ==="
+          ls -R .
+          echo "=== PROJECT DIRECTORY TREE (${{ steps.repo-dir.outputs.dir }}) ==="
+          ls -R "${{ steps.repo-dir.outputs.dir }}"
+
+      - name: Run scraper
+        working-directory: ${{ steps.repo-dir.outputs.dir }}
+        env:
+          GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python main.py
