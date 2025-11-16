@@ -8,6 +8,8 @@ jobs:
     runs-on:
       - self-hosted
       - mac-runner
+      - ARM64
+      - mac-runner
       
     steps:
       - name: Checkout repo
