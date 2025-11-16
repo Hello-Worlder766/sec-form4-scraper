@@ -5,22 +5,26 @@ on:
 
 jobs:
   run:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
+      - mac-runner   # 🚨 REQUIRED
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip3 install -r requirements.txt
 
       - name: Run scraper
         env:
           GOOGLE_SHEETS_KEY: ${{ secrets.GOOGLE_SHEETS_KEY }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: python main.py
+        run: python3 main.py
