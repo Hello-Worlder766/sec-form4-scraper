@@ -5,8 +5,10 @@ on:
 
 jobs:
   run:
-    runs-on: self-hosted
-
+    runs-on:
+      - self-hosted
+      - macOS
+      - ARM64
 
     steps:
       - name: Checkout repo
