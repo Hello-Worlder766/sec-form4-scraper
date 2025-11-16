@@ -7,9 +7,8 @@ jobs:
   run:
     runs-on:
       - self-hosted
-      - macOS
-      - ARM64
-
+      - mac-runner
+      
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
