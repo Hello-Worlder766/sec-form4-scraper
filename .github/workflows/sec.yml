@@ -7,7 +7,7 @@ jobs:
   run:
     runs-on:
       - self-hosted
-      - macOS
+      - macos
       - ARM64
       - mac-runner   # 🚨 REQUIRED
 
