@@ -5,11 +5,8 @@ on:
 
 jobs:
   run:
-    runs-on:
-      - self-hosted
-      - macos
-      - ARM64
-      - mac-runner   # 🚨 REQUIRED
+    runs-on: [self-hosted, macos, mac-runner]
+
 
     steps:
       - name: Checkout repo
